@@ -11,10 +11,12 @@ import {
 } from '@/lib/supabase';
 import { getServiceIcon } from '@/lib/icons';
 import { mergeLocalNurses, normalizeNurses } from '@/lib/nurses';
+import { useHideServicePrices } from '@/lib/clientSettings';
 import type { Page } from '@/components/Layout';
 
 const CUSTOM_LOCATION_NAME = 'مكان مخصوص / خارج الحامول';
 const CUSTOM_LOCATION_ID_PREFIX = 'custom-location-';
+const NURSE_WHATSAPP_NUMBER = '201007204136';
 
 interface BookingProps {
   onNavigate: (page: Page) => void;
@@ -41,6 +43,7 @@ interface BookingData {
 const STEPS = ['اختر الخدمة', 'اختر المنطقة', 'اختر الممرض', 'التاريخ والوقت', 'بياناتك', 'الفاتورة', 'إثبات الدفع', 'التأكيد'];
 
 export function Booking({ onNavigate }: BookingProps) {
+  const hideServicePrices = useHideServicePrices();
   const [step, setStep] = useState(0);
   const [services, setServices] = useState<Service[]>([]);
   const [villages, setVillages] = useState<Village[]>([]);
@@ -76,7 +79,7 @@ export function Booking({ onNavigate }: BookingProps) {
         supabase.from('services').select('*').eq('is_visible', true).order('created_at'),
         supabase.from('villages').select('*').order('name'),
         supabase.from('nurses').select('*').order('created_at'),
-        supabase.from('admin_settings').select('id, night_shift_fee, urgent_fee, night_shift_start_hour, created_at').limit(1).maybeSingle(),
+        supabase.from('admin_settings').select('*').limit(1).maybeSingle(),
       ]);
       if (s.data) setServices(s.data);
       if (v.data) {
@@ -190,6 +193,12 @@ export function Booking({ onNavigate }: BookingProps) {
       return;
     }
 
+    const whatsappWindow = window.open('about:blank', '_blank');
+    if (whatsappWindow) {
+      whatsappWindow.document.title = 'جارٍ تسجيل الحجز';
+      whatsappWindow.document.body.innerText = 'جارٍ تسجيل الحجز... سيتم تحويلك إلى واتساب بعد نجاح العملية.';
+    }
+
     setSubmitting(true);
     setError('');
     try {
@@ -235,33 +244,40 @@ export function Booking({ onNavigate }: BookingProps) {
       setBookingCode(code);
       setData((current) => ({ ...current, receiptUrl }));
       setStep(7);
+      if (whatsappWindow && !whatsappWindow.closed) {
+        whatsappWindow.opener = null;
+        whatsappWindow.location.href = `https://wa.me/${NURSE_WHATSAPP_NUMBER}?text=${buildWhatsAppMessage(code, receiptUrl)}`;
+      }
     } catch (err) {
+      if (whatsappWindow && !whatsappWindow.closed) whatsappWindow.close();
       setError(err instanceof Error ? err.message : 'حدث خطأ أثناء الحجز');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const buildWhatsAppMessage = (): string => {
+  const buildWhatsAppMessage = (code = bookingCode, receiptUrl = data.receiptUrl): string => {
     const lines = [
-      `🩺 *طلب حجز تمريض منزلي*`,
+      'مرحباً، لقد قمت بحجز خدمة تمريض منزلي وإرسال العربون.',
       `━━━━━━━━━━━━━━━`,
-      `📋 رقم الطلب: ${bookingCode}`,
+      `📋 رقم الطلب: ${code}`,
       `🩹 الخدمة: ${data.service?.title}`,
-      `📍 المنطقة: ${data.village?.name}`,
+      `📱 رقم هاتف العميل: ${data.phone}`,
+      `📍 المنطقة: ${data.village?.name ?? 'غير محددة'}`,
+      `🏠 العنوان: ${data.address}`,
       data.urgent ? `⚡ نوع الطلب: عاجل (أقرب وقت)` : `📅 الموعد: ${data.date} ${data.time}`,
       `👤 الاسم: ${data.name}`,
-      `📱 الهاتف: ${data.phone}`,
       `📲 رقم المحول منه: ${data.senderNumber}`,
-      `🏠 العنوان: ${data.address}`,
-      data.receiptUrl ? '🧾 تم إرفاق إيصال الدفع في لوحة الإدارة' : '',
+      receiptUrl ? '🧾 تم إرفاق إيصال الدفع في لوحة الإدارة' : '',
       data.notes ? `📝 ملاحظات: ${data.notes}` : '',
       `━━━━━━━━━━━━━━━`,
-      `💰 سعر الخدمة: ${formatPrice(pricing.base)}`,
-      pricing.extras > 0 ? `➕ رسوم إضافية: ${formatPrice(pricing.extras)}` : '',
-      `━━━━━━━━━━━━━━━`,
-      `💵 الإجمالي: ${formatPrice(pricing.total)}`,
-      `💳 العربون (30%): ${formatPrice(pricing.deposit)}`,
+      ...(!hideServicePrices ? [
+        `💰 سعر الخدمة: ${formatPrice(pricing.base)}`,
+        pricing.extras > 0 ? `➕ رسوم إضافية: ${formatPrice(pricing.extras)}` : '',
+        `━━━━━━━━━━━━━━━`,
+        `💵 الإجمالي: ${formatPrice(pricing.total)}`,
+      ] : []),
+      `💳 ${hideServicePrices ? 'العربون المطلوب للتأكيد' : 'العربون (30%)'}: ${formatPrice(pricing.deposit)}`,
     ].filter(Boolean);
     return encodeURIComponent(lines.join('\n'));
   };
@@ -346,7 +362,9 @@ export function Booking({ onNavigate }: BookingProps) {
                             <span className={`text-xs px-2 py-0.5 rounded-full ${s.category === 'short_visit' ? 'bg-blue-500/10 text-blue-300' : 'bg-purple-500/10 text-purple-300'}`}>
                               {s.category === 'short_visit' ? 'زيارة قصيرة' : 'رعاية ممتدة'}
                             </span>
-                            <span className="text-teal-300 font-bold text-sm">{formatPrice(s.price_base)}</span>
+                            {!hideServicePrices && (
+                              <span className="text-teal-300 font-bold text-sm">{formatPrice(s.price_base)}</span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -632,22 +650,33 @@ export function Booking({ onNavigate }: BookingProps) {
                 <InvoiceRow label="إسناد الممرض" value="تلقائي حسب التوفر" />
                 <InvoiceRow label="نوع الطلب" value={data.urgent ? 'عاجل' : `${data.date} ${data.time}`} />
                 <div className="border-t border-white/10 my-3" />
-                <InvoiceRow label="سعر الخدمة" value={formatPrice(pricing.base)} mono />
-                {pricing.extras > 0 && (
-                  <InvoiceRow label="رسوم إضافية (ليلي/عاجل)" value={formatPrice(pricing.extras)} mono />
+                {!hideServicePrices && (
+                  <>
+                    <InvoiceRow label="سعر الخدمة" value={formatPrice(pricing.base)} mono />
+                    {pricing.extras > 0 && (
+                      <InvoiceRow label="رسوم إضافية (ليلي/عاجل)" value={formatPrice(pricing.extras)} mono />
+                    )}
+                    <div className="border-t border-white/10 my-3" />
+                    <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-l from-teal-500/10 to-emerald-500/10 border border-teal-400/20">
+                      <span className="text-white font-bold text-lg">الإجمالي</span>
+                      <span className="text-teal-300 font-bold text-2xl">{formatPrice(pricing.total)}</span>
+                    </div>
+                  </>
                 )}
-                <div className="border-t border-white/10 my-3" />
-                <div className="flex items-center justify-between p-4 rounded-xl bg-gradient-to-l from-teal-500/10 to-emerald-500/10 border border-teal-400/20">
-                  <span className="text-white font-bold text-lg">الإجمالي</span>
-                  <span className="text-teal-300 font-bold text-2xl">{formatPrice(pricing.total)}</span>
-                </div>
                 <div className="flex items-center justify-between p-4 rounded-xl bg-amber-500/10 border border-amber-400/20">
                   <div>
-                    <span className="text-white font-bold">العربون المطلوب (30%)</span>
+                    <span className="text-white font-bold">
+                      {hideServicePrices ? 'العربون المطلوب للتأكيد' : 'العربون المطلوب (30%)'}
+                    </span>
                     <span className="block text-amber-300/70 text-xs">يُدفع عند الحجز لتأكيد الطلب</span>
                   </div>
                   <span className="text-amber-300 font-bold text-xl">{formatPrice(pricing.deposit)}</span>
                 </div>
+                {hideServicePrices && (
+                  <p className="text-center text-sm text-gray-400">
+                    يتم عرض العربون المطلوب فقط، وسيتم توضيح تفاصيل تكلفة الخدمة من خلال فريق التمريض.
+                  </p>
+                )}
               </div>
 
               {error && (
@@ -749,19 +778,19 @@ export function Booking({ onNavigate }: BookingProps) {
                   </div>
                 </div>
                 <p className="text-gray-400 text-sm">
-                  بعد إرسال العربون، اضغط على زر واتساب بالأسفل لإرسال تفاصيل الطلب تلقائياً للمشرف وتأكيد الحجز.
+                  سيتم فتح واتساب تلقائيًا برسالة التأكيد بعد نجاح الحجز. يمكنك استخدام الزر أدناه إذا لم يُفتح تلقائيًا.
                 </p>
               </div>
 
               {/* WhatsApp send */}
               <a
-                href={`https://wa.me/2${SUPERVISOR_PHONE}?text=${buildWhatsAppMessage()}`}
+                href={`https://wa.me/${NURSE_WHATSAPP_NUMBER}?text=${buildWhatsAppMessage()}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn-primary w-full flex items-center justify-center gap-2 !bg-green-500 hover:!bg-green-600"
               >
                 <MessageCircle className="w-5 h-5" />
-                إرسال الطلب عبر واتساب
+                إرسال تأكيد الحجز عبر واتساب للممرض 📱
               </a>
 
               <div className="flex gap-3 mt-4">

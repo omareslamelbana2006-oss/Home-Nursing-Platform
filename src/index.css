@@ -242,6 +242,10 @@ html[data-theme='light'] .app-shell main [class~="text-cyan-300"] {
   color: #0369a1;
 }
 
+html[data-theme='light'] .contact-supervisor-label {
+  color: #0f172a;
+}
+
 html[data-theme='light'] .app-shell main [class~="text-blue-300"] {
   color: #1d4ed8;
 }

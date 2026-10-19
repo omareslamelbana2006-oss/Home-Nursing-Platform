@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS admin_settings (
   night_shift_fee numeric(10,2) NOT NULL DEFAULT 50,
   urgent_fee numeric(10,2) NOT NULL DEFAULT 30,
   night_shift_start_hour int NOT NULL DEFAULT 22,
+  hide_service_prices boolean NOT NULL DEFAULT false,
   created_at timestamptz DEFAULT now()
 );
 ALTER TABLE admin_settings ENABLE ROW LEVEL SECURITY;

@@ -11,6 +11,7 @@ import {
   CANCEL_TRANSFER_FEE, type BookingStatus, type PaymentStatus,
 } from '@/lib/supabase';
 import { getLocalNurses, isMissingNurseAdminColumn, mergeLocalNurses, normalizeNurses, saveLocalNurses } from '@/lib/nurses';
+import { getLocalHideServicePrices, publishHideServicePrices } from '@/lib/clientSettings';
 import type { Page } from '@/components/Layout';
 
 const DEFAULT_PASSKEY = '*Mohamed2000*';
@@ -516,15 +517,23 @@ function PricingTab() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
+  const [saveWarning, setSaveWarning] = useState(false);
 
   useEffect(() => {
     (async () => {
       const [s, a] = await Promise.all([
         supabase.from('services').select('*').order('created_at'),
-        supabase.from('admin_settings').select('id, night_shift_fee, urgent_fee, night_shift_start_hour, created_at').limit(1).maybeSingle(),
+        supabase.from('admin_settings').select('*').limit(1).maybeSingle(),
       ]);
       if (s.data) setServices(s.data);
-      if (a.data) setSettings(a.data as AdminSettings);
+      if (a.data) {
+        setSettings({
+          ...a.data,
+          hide_service_prices: typeof a.data.hide_service_prices === 'boolean'
+            ? a.data.hide_service_prices
+            : getLocalHideServicePrices(),
+        } as AdminSettings);
+      }
       setLoading(false);
     })();
   }, []);
@@ -541,11 +550,46 @@ function PricingTab() {
   const updateSettings = async () => {
     if (!settings) return;
     setSaving(true);
-    await supabase.from('admin_settings').update({
+    setSavedMsg('');
+    setSaveWarning(false);
+    const settingsUpdate = {
       night_shift_fee: settings.night_shift_fee,
       urgent_fee: settings.urgent_fee,
       night_shift_start_hour: settings.night_shift_start_hour,
-    }).eq('id', settings.id);
+      hide_service_prices: settings.hide_service_prices,
+    };
+    const { error } = await supabase.from('admin_settings').update(settingsUpdate).eq('id', settings.id);
+    if (error) {
+      const missingSettingColumn = error.code === 'PGRST204' || error.message.includes('hide_service_prices');
+      if (!missingSettingColumn) {
+        console.error('Error saving admin settings:', error);
+        setSavedMsg('تعذر حفظ الإعدادات في قاعدة البيانات.');
+        setSaveWarning(true);
+        setSaving(false);
+        return;
+      }
+
+      const fallback = await supabase.from('admin_settings').update({
+        night_shift_fee: settings.night_shift_fee,
+        urgent_fee: settings.urgent_fee,
+        night_shift_start_hour: settings.night_shift_start_hour,
+      }).eq('id', settings.id);
+      if (fallback.error) {
+        console.error('Error saving fallback admin settings:', fallback.error);
+        setSavedMsg('تعذر حفظ الإعدادات في قاعدة البيانات.');
+        setSaveWarning(true);
+        setSaving(false);
+        return;
+      }
+
+      publishHideServicePrices(settings.hide_service_prices);
+      setSavedMsg('حُفظ إعداد إخفاء الأسعار على هذا الجهاز فقط. طبّق تحديث قاعدة البيانات لمشاركته مع جميع العملاء.');
+      setSaveWarning(true);
+      setSaving(false);
+      return;
+    }
+
+    publishHideServicePrices(settings.hide_service_prices);
     setSaving(false);
     setSavedMsg('تم حفظ الإعدادات بنجاح');
     setTimeout(() => setSavedMsg(''), 2000);
@@ -591,45 +635,63 @@ function PricingTab() {
 
       {/* Extra settings */}
       <div className="glass-card p-6">
-        <h3 className="text-white font-bold mb-4">رسوم إضافية</h3>
+        <h3 className="text-white font-bold mb-4">الإعدادات العامة والرسوم الإضافية</h3>
         {settings && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
-            <div>
-              <label className="text-gray-300 text-sm mb-2 block">رسوم الوردية الليلية</label>
+          <>
+            <label className="mb-5 flex cursor-pointer items-center justify-between gap-4 rounded-xl border border-white/10 bg-white/5 p-4">
+              <span>
+                <span className="block font-semibold text-white">إخفاء سعر الخدمة عن الفاتورة والعميل</span>
+                <span className="mt-1 block text-sm text-gray-400">
+                  يُظهر للعميل العربون المطلوب فقط، مع الاحتفاظ بكامل الأسعار في لوحة الإدارة.
+                </span>
+              </span>
               <input
-                type="number"
-                value={settings.night_shift_fee}
-                onChange={(e) => setSettings({ ...settings, night_shift_fee: parseFloat(e.target.value) || 0 })}
-                className="input-field"
+                type="checkbox"
+                role="switch"
+                checked={settings.hide_service_prices}
+                onChange={(event) => setSettings({ ...settings, hide_service_prices: event.target.checked })}
+                aria-label="إخفاء سعر الخدمة عن الفاتورة والعميل"
+                className="h-5 w-5 shrink-0 accent-teal-500"
               />
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+              <div>
+                <label className="text-gray-300 text-sm mb-2 block">رسوم الوردية الليلية</label>
+                <input
+                  type="number"
+                  value={settings.night_shift_fee}
+                  onChange={(e) => setSettings({ ...settings, night_shift_fee: parseFloat(e.target.value) || 0 })}
+                  className="input-field"
+                />
+              </div>
+              <div>
+                <label className="text-gray-300 text-sm mb-2 block">رسوم الطلب العاجل</label>
+                <input
+                  type="number"
+                  value={settings.urgent_fee}
+                  onChange={(e) => setSettings({ ...settings, urgent_fee: parseFloat(e.target.value) || 0 })}
+                  className="input-field"
+                />
+              </div>
+              <div>
+                <label className="text-gray-300 text-sm mb-2 block">بداية الوردية الليلية (الساعة)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={settings.night_shift_start_hour}
+                  onChange={(e) => setSettings({ ...settings, night_shift_start_hour: parseInt(e.target.value) || 0 })}
+                  className="input-field"
+                />
+              </div>
             </div>
-            <div>
-              <label className="text-gray-300 text-sm mb-2 block">رسوم الطلب العاجل</label>
-              <input
-                type="number"
-                value={settings.urgent_fee}
-                onChange={(e) => setSettings({ ...settings, urgent_fee: parseFloat(e.target.value) || 0 })}
-                className="input-field"
-              />
-            </div>
-            <div>
-              <label className="text-gray-300 text-sm mb-2 block">بداية الوردية الليلية (الساعة)</label>
-              <input
-                type="number"
-                min={0}
-                max={23}
-                value={settings.night_shift_start_hour}
-                onChange={(e) => setSettings({ ...settings, night_shift_start_hour: parseInt(e.target.value) || 0 })}
-                className="input-field"
-              />
-            </div>
-          </div>
+          </>
         )}
         <button onClick={updateSettings} disabled={saving} className="btn-primary flex items-center gap-2">
           {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save className="w-4 h-4" />}
           حفظ الإعدادات
         </button>
-        {savedMsg && <span className="text-emerald-300 text-sm mr-3">{savedMsg}</span>}
+        {savedMsg && <span className={`${saveWarning ? 'text-amber-300' : 'text-emerald-300'} text-sm mr-3`}>{savedMsg}</span>}
       </div>
     </div>
   );

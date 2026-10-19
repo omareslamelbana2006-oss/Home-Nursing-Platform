@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Search, ClipboardList, Phone, MapPin, Calendar,
   Zap, FileText, Package, AlertCircle, ArrowLeft,
@@ -8,18 +8,27 @@ import {
   formatPrice, getStatusLabel, getStatusColor, getPaymentStatusLabel, getPaymentStatusColor,
 } from '@/lib/supabase';
 import type { Page } from '@/components/Layout';
+import { useHideServicePrices } from '@/lib/clientSettings';
 
 interface TrackProps {
   onNavigate: (page: Page) => void;
 }
 
 export function Track({ onNavigate }: TrackProps) {
+  const hideServicePrices = useHideServicePrices();
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
   const [booking, setBooking] = useState<BookingWithRelations | null>(null);
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState('');
+  const orderResultRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (searched && !loading && booking) {
+      orderResultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [searched, loading, booking]);
 
   const handleSearch = async () => {
     if (phone.trim().length < 10 || code.trim().length < 3) {
@@ -29,6 +38,7 @@ export function Track({ onNavigate }: TrackProps) {
     setLoading(true);
     setError('');
     setSearched(true);
+    setBooking(null);
     try {
       const { data, error: qErr } = await supabase
         .from('bookings')
@@ -55,17 +65,17 @@ export function Track({ onNavigate }: TrackProps) {
 
   return (
     <div className="pt-24 pb-12 min-h-screen">
-      <div className="max-w-2xl mx-auto px-4 sm:px-6">
+      <div className="w-full max-w-lg mx-auto px-4">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-teal-500/20 to-emerald-500/20 flex items-center justify-center mx-auto mb-3">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-teal-500/20 to-emerald-500/20 flex items-center justify-center mx-auto mb-3">
             <Package className="w-8 h-8 text-teal-400" />
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">تتبع طلبك</h1>
-          <p className="text-gray-400">أدخل رقم هاتفك ورمز الطلب لمتابعة الحالة</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">تتبع طلبك</h1>
+          <p className="text-gray-400 text-sm sm:text-base">أدخل رقم هاتفك ورمز الطلب لمتابعة الحالة</p>
         </div>
 
         {/* Search form */}
-        <div className="glass-card p-6 mb-6">
+        <div className="glass-card p-4 sm:p-6 mb-6">
           <div className="space-y-4">
             <div>
               <label className="text-gray-300 text-sm font-medium mb-2 flex items-center gap-2">
@@ -129,13 +139,13 @@ export function Track({ onNavigate }: TrackProps) {
             ) : (
               <div className="space-y-4">
                 {/* Status card */}
-                <div className="glass-card p-6">
+                <div ref={orderResultRef} className="glass-card scroll-mt-24 p-4 sm:p-6">
                   <div className="flex items-start justify-between mb-4">
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-gray-400 text-xs mb-1">رمز الطلب</div>
-                      <div className="text-xl font-bold neon-text" dir="ltr">{booking.booking_code}</div>
+                      <div className="text-lg sm:text-xl font-bold neon-text break-words" dir="ltr">{booking.booking_code}</div>
                     </div>
-                    <div className={`px-3 py-1.5 rounded-full text-sm font-semibold border ${getStatusColor(booking.status)}`}>
+                    <div className={`shrink-0 px-2.5 sm:px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold border ${getStatusColor(booking.status)}`}>
                       {getStatusLabel(booking.status)}
                     </div>
                   </div>
@@ -158,7 +168,7 @@ export function Track({ onNavigate }: TrackProps) {
                 </div>
 
                 {/* Details card */}
-                <div className="glass-card p-6 space-y-3">
+                <div className="glass-card min-w-0 p-4 sm:p-6 space-y-3">
                   <h3 className="text-white font-bold mb-3">تفاصيل الطلب</h3>
                   <DetailRow icon={<ClipboardList className="w-4 h-4" />} label="الخدمة" value={booking.service?.title ?? '-'} />
                   <DetailRow icon={<MapPin className="w-4 h-4" />} label="المنطقة" value={booking.village?.name ?? '-'} />
@@ -181,17 +191,26 @@ export function Track({ onNavigate }: TrackProps) {
                 </div>
 
                 {/* Payment card */}
-                <div className="glass-card p-6">
+                <div className="glass-card p-4 sm:p-6">
                   <h3 className="text-white font-bold mb-4">الدفعة</h3>
                   <div className="space-y-2">
+                    {!hideServicePrices && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-400">الإجمالي</span>
+                        <span className="text-white font-semibold">{formatPrice(booking.total_price)}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">الإجمالي</span>
-                      <span className="text-white font-semibold">{formatPrice(booking.total_price)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-400">العربون</span>
+                      <span className="text-gray-400">
+                        {hideServicePrices ? 'العربون المطلوب للتأكيد' : 'العربون'}
+                      </span>
                       <span className="text-amber-300 font-semibold">{formatPrice(booking.deposit_amount)}</span>
                     </div>
+                    {hideServicePrices && (
+                      <p className="text-xs text-gray-400">
+                        يتم عرض العربون المطلوب فقط، وسيتم توضيح تفاصيل تكلفة الخدمة من خلال فريق التمريض.
+                      </p>
+                    )}
                     <div className="flex justify-between items-center pt-2 border-t border-white/10">
                       <span className="text-gray-400 text-sm">حالة الدفع</span>
                       <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getPaymentStatusColor(booking.payment_status)}`}>
@@ -222,10 +241,10 @@ export function Track({ onNavigate }: TrackProps) {
 
 function DetailRow({ icon, label, value, ltr }: { icon: React.ReactNode; label: string; value: string; ltr?: boolean }) {
   return (
-    <div className="flex items-start gap-2">
-      <span className="text-teal-400 mt-0.5">{icon}</span>
-      <span className="text-gray-400 text-sm min-w-[80px]">{label}:</span>
-      <span className="text-white text-sm flex-1" dir={ltr ? 'ltr' : 'rtl'}>{value}</span>
+    <div className="flex min-w-0 items-start gap-2">
+      <span className="text-teal-400 mt-0.5 shrink-0">{icon}</span>
+      <span className="text-gray-400 text-sm min-w-[72px] shrink-0">{label}:</span>
+      <span className="text-white text-sm min-w-0 flex-1 break-words whitespace-pre-wrap" dir={ltr ? 'ltr' : 'rtl'}>{value}</span>
     </div>
   );
 }

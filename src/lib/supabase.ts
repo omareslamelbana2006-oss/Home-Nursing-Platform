@@ -77,6 +77,7 @@ export interface AdminSettings {
   night_shift_fee: number;
   urgent_fee: number;
   night_shift_start_hour: number;
+  hide_service_prices: boolean;
   created_at: string;
 }
 

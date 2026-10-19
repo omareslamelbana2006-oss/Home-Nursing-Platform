@@ -9,6 +9,7 @@ import {
   formatPrice,
 } from '@/lib/supabase';
 import { getServiceIcon } from '@/lib/icons';
+import { useHideServicePrices } from '@/lib/clientSettings';
 import type { Page } from '@/components/Layout';
 
 interface HomeProps {
@@ -16,6 +17,7 @@ interface HomeProps {
 }
 
 export function Home({ onNavigate }: HomeProps) {
+  const hideServicePrices = useHideServicePrices();
   const [services, setServices] = useState<Service[]>([]);
   const [villages, setVillages] = useState<Village[]>([]);
   const [loading, setLoading] = useState(true);
@@ -220,10 +222,12 @@ export function Home({ onNavigate }: HomeProps) {
                   <h3 className="text-white font-bold text-lg mb-2">{service.title}</h3>
                   <p className="text-slate-300 text-sm leading-relaxed mb-4">{service.description}</p>
                   <div className="flex items-center justify-between pt-4 border-t border-white/10">
-                    <div>
-                      <span className="text-slate-400 text-xs">السعر يبدأ من</span>
-                      <div className="text-sky-300 font-bold text-xl">{formatPrice(service.price_base)}</div>
-                    </div>
+                    {!hideServicePrices && (
+                      <div>
+                        <span className="text-slate-400 text-xs">السعر يبدأ من</span>
+                        <div className="text-sky-300 font-bold text-xl">{formatPrice(service.price_base)}</div>
+                      </div>
+                    )}
                     <div className="flex items-center gap-1 text-sky-300 text-sm font-medium opacity-0 group-hover:opacity-100 transition-opacity">
                       احجز الآن
                       <ChevronLeft className="w-4 h-4" />
@@ -311,9 +315,14 @@ export function Home({ onNavigate }: HomeProps) {
                 <ClipboardList className="w-5 h-5" />
                 ابدأ الحجز
               </button>
-              <a href={`tel:${SUPERVISOR_PHONE}`} className="btn-secondary flex items-center gap-2">
-                <Phone className="w-5 h-5 text-sky-300" />
-                اتصل بمستر محمد علي
+              <a href={`tel:${SUPERVISOR_PHONE}`} className="btn-secondary inline-flex items-center gap-3 px-5 py-3 text-right">
+                <Phone className="w-5 h-5 shrink-0 text-sky-300" />
+                <span className="flex flex-col items-start gap-1 leading-tight">
+                  <span className="contact-supervisor-label">اتصل بمستر محمد علي</span>
+                  <span className="rounded-md border border-cyan-300/20 bg-cyan-400/10 px-2 py-0.5 text-sm font-bold tracking-wide text-cyan-300" dir="ltr">
+                    {SUPERVISOR_PHONE}
+                  </span>
+                </span>
               </a>
             </div>
           </div>
