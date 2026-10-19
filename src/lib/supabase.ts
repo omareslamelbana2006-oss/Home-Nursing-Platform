@@ -37,6 +37,7 @@ export interface Service {
 export interface Village {
   id: string;
   name: string;
+  transfer_fee: number;
   created_at: string;
 }
 
@@ -45,7 +46,7 @@ export interface Nurse {
   name: string;
   phone: string;
   passkey: string;
-  is_supervisor: boolean;
+  is_main_admin: boolean;
   created_at: string;
 }
 

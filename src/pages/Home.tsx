@@ -48,7 +48,7 @@ export function Home({ onNavigate }: HomeProps) {
   return (
     <div className="pt-16">
       {/* Hero Section */}
-      <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
+      <section className="home-hero relative min-h-screen flex items-center justify-center overflow-hidden">
         {/* Background image with overlay */}
         <div className="absolute inset-0">
           <div className="absolute inset-0 bg-gradient-to-br from-[#0a192f] via-[#0f172a] to-[#1e293b]" />

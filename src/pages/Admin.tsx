@@ -6,10 +6,11 @@ import {
   UserPlus, UserMinus, Edit, Trash2,
 } from 'lucide-react';
 import {
-  supabase, type Service, type BookingWithRelations, type AdminSettings,
+  supabase, type Service, type BookingWithRelations, type AdminSettings, type Nurse,
   formatPrice, getStatusLabel, getStatusColor, getPaymentStatusLabel, getPaymentStatusColor,
   CANCEL_TRANSFER_FEE, type BookingStatus, type PaymentStatus,
 } from '@/lib/supabase';
+import { getLocalNurses, isMissingNurseAdminColumn, mergeLocalNurses, normalizeNurses, saveLocalNurses } from '@/lib/nurses';
 import type { Page } from '@/components/Layout';
 
 const DEFAULT_PASSKEY = '*Mohamed2000*';
@@ -268,8 +269,19 @@ function OrdersTab() {
     });
   }, [bookings, filter, search]);
 
+  const getReceiptUrl = (booking: BookingWithRelations) =>
+    booking.receipt_url ?? getBookingNoteValue(booking.notes, 'رابط الإيصال');
+
+  const getSenderNumber = (booking: BookingWithRelations) =>
+    booking.sender_number ?? getBookingNoteValue(booking.notes, 'رقم التحويل') ?? '-';
+
+  const getNurseName = (booking: BookingWithRelations) =>
+    getBookingNoteValue(booking.notes, 'الممرض') ??
+    getBookingNoteValue(booking.notes, 'الممرض المطلوب') ??
+    'سيتم تعيينه حسب التوفر';
+
   const updateStatus = async (id: string, status: BookingStatus) => {
-    if (status === 'confirmed' && selected?.id === id && !selected.receipt_url) return;
+    if (status === 'confirmed' && selected?.id === id && !getReceiptUrl(selected)) return;
     await supabase.from('bookings').update({ status }).eq('id', id);
     fetchBookings();
     if (selected?.id === id) setSelected({ ...selected, status });
@@ -374,9 +386,10 @@ function OrdersTab() {
             <div className="space-y-3 mb-6">
               <DetailItem label="العميل" value={selected.client_name} />
               <DetailItem label="الهاتف" value={selected.client_phone} ltr />
-              <DetailItem label="رقم المحول منه" value={selected.sender_number ?? '-'} ltr />
+              <DetailItem label="رقم المحول منه" value={getSenderNumber(selected)} ltr />
+              <DetailItem label="الممرض" value={getNurseName(selected)} />
               <DetailItem label="الخدمة" value={selected.service?.title ?? '-'} />
-              <DetailItem label="المنطقة" value={selected.village?.name ?? '-'} />
+              <DetailItem label="المنطقة" value={selected.village?.name ?? getBookingNoteValue(selected.notes, 'الموقع') ?? '-'} />
               <DetailItem label="العنوان" value={selected.address} />
               <DetailItem label="الموعد" value={selected.urgent_booking ? 'عاجل' : (selected.date_time ? new Date(selected.date_time).toLocaleString('ar-EG') : '-')} />
               {selected.notes && <DetailItem label="ملاحظات" value={selected.notes} />}
@@ -388,15 +401,15 @@ function OrdersTab() {
               )}
               <div className="border-t border-white/10 pt-3">
                 <span className="text-gray-400 text-sm block mb-2">إيصال الدفع</span>
-                {selected.receipt_url ? (
+                {getReceiptUrl(selected) ? (
                   <button
                     type="button"
-                    onClick={() => setReceiptPreviewUrl(selected.receipt_url)}
+                    onClick={() => setReceiptPreviewUrl(getReceiptUrl(selected)!)}
                     className="group flex items-center gap-3 text-right"
                     aria-label="عرض إيصال الدفع بالحجم الكامل"
                   >
                     <img
-                      src={selected.receipt_url}
+                      src={getReceiptUrl(selected)!}
                       alt="إيصال الدفع"
                       className="w-24 h-24 object-cover rounded-lg border border-white/15 group-hover:border-teal-400/60"
                     />
@@ -416,7 +429,7 @@ function OrdersTab() {
             <div className="space-y-4">
               <div>
                 <label className="text-gray-300 text-sm font-medium mb-2 block">حالة الطلب</label>
-                {!selected.receipt_url && (
+                {!getReceiptUrl(selected) && (
                   <p className="text-amber-300 text-xs mb-2">لا يمكن تأكيد الطلب قبل مراجعة إيصال الدفع.</p>
                 )}
                 <div className="flex flex-wrap gap-2">
@@ -424,10 +437,10 @@ function OrdersTab() {
                     <button
                       key={s}
                       onClick={() => updateStatus(selected.id, s)}
-                      disabled={s === 'confirmed' && !selected.receipt_url}
+                      disabled={s === 'confirmed' && !getReceiptUrl(selected)}
                       className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-all ${
                         selected.status === s ? getStatusColor(s) : 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10'
-                      } ${s === 'confirmed' && !selected.receipt_url ? 'opacity-40 cursor-not-allowed' : ''}`}
+                      } ${s === 'confirmed' && !getReceiptUrl(selected) ? 'opacity-40 cursor-not-allowed' : ''}`}
                     >
                       {getStatusLabel(s)}
                     </button>
@@ -487,6 +500,13 @@ function DetailItem({ label, value, ltr, highlight }: { label: string; value: st
       <span className={`text-sm ${highlight ? 'text-teal-300 font-bold text-lg' : 'text-white'}`} dir={ltr ? 'ltr' : 'rtl'}>{value}</span>
     </div>
   );
+}
+
+function getBookingNoteValue(notes: string, label: string): string | null {
+  const prefix = `${label}:`;
+  const line = notes.split('\n').find((entry) => entry.startsWith(prefix));
+  const value = line?.slice(prefix.length).trim();
+  return value || null;
 }
 
 // ===== Pricing Tab =====
@@ -813,26 +833,18 @@ function RefundTab() {
 }
 
 // ===== Nurses Management Tab =====
-interface Nurse {
-  id: string;
-  name: string;
-  phone: string;
-  passkey: string;
-  is_supervisor: boolean;
-  created_at: string;
-}
-
 function NursesTab() {
   const [nurses, setNurses] = useState<Nurse[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingNurse, setEditingNurse] = useState<Nurse | null>(null);
+  const [notice, setNotice] = useState('');
 
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
     passkey: '',
-    is_supervisor: false,
+    is_main_admin: false,
   });
 
   const fetchNurses = useCallback(async () => {
@@ -844,8 +856,14 @@ function NursesTab() {
 
     if (error) {
       console.error('Error fetching nurses:', error);
+      setNurses(getLocalNurses());
+      setNotice('تعذر الاتصال بقاعدة البيانات؛ يتم عرض الممرضين المحفوظين على هذا الجهاز فقط.');
     } else {
-      setNurses(data || []);
+      const mergedNurses = mergeLocalNurses(normalizeNurses(data || []));
+      setNurses(mergedNurses);
+      setNotice(mergedNurses.some((nurse) => nurse.id.startsWith('local-'))
+        ? 'توجد ممرضون محفوظون على هذا الجهاز فقط؛ لن تظهر سجلاتهم على الأجهزة الأخرى.'
+        : '');
     }
     setLoading(false);
   }, []);
@@ -858,38 +876,83 @@ function NursesTab() {
     e.preventDefault();
 
     if (editingNurse) {
+      if (editingNurse.id.startsWith('local-')) {
+        const updatedNurses = getLocalNurses().map((nurse) =>
+          nurse.id === editingNurse.id ? { ...nurse, ...formData } : nurse,
+        );
+        saveLocalNurses(updatedNurses);
+        setNotice('تم حفظ بيانات الممرض على هذا الجهاز فقط؛ لن تظهر على الأجهزة الأخرى.');
+        setFormData({ name: '', phone: '', passkey: '', is_main_admin: false });
+        setShowAddForm(false);
+        setEditingNurse(null);
+        fetchNurses();
+        return;
+      }
+
       // Update existing nurse
-      const { error } = await supabase
+      let { error } = await supabase
         .from('nurses')
         .update({
           name: formData.name,
           phone: formData.phone,
           passkey: formData.passkey,
-          is_supervisor: formData.is_supervisor,
+          is_main_admin: formData.is_main_admin,
         })
         .eq('id', editingNurse.id);
 
+      if (error && isMissingNurseAdminColumn(error)) {
+        const result = await supabase
+          .from('nurses')
+          .update({
+            name: formData.name,
+            phone: formData.phone,
+            passkey: formData.passkey,
+            is_supervisor: formData.is_main_admin,
+          })
+          .eq('id', editingNurse.id);
+        error = result.error;
+      }
+
       if (error) {
-        alert('فشل تحديث البيانات');
+        console.error('Error updating nurse:', error);
+        setNotice('تعذر تحديث بيانات الممرض في قاعدة البيانات.');
         return;
       }
     } else {
-      // Add new nurse
-      const { error } = await supabase.from('nurses').insert([{
+      const nurseData = {
         name: formData.name,
         phone: formData.phone,
         passkey: formData.passkey,
-        is_supervisor: formData.is_supervisor,
-      }]);
+        is_main_admin: formData.is_main_admin,
+      };
+      let { error } = await supabase.from('nurses').insert([nurseData]);
+
+      if (error && isMissingNurseAdminColumn(error)) {
+        const result = await supabase.from('nurses').insert([{
+          name: formData.name,
+          phone: formData.phone,
+          passkey: formData.passkey,
+          is_supervisor: formData.is_main_admin,
+        }]);
+        error = result.error;
+      }
 
       if (error) {
-        alert('فشل إضافة الممرض');
-        return;
+        console.error('Could not create nurse in Supabase; saving locally:', error);
+        const localNurse: Nurse = {
+          id: `local-${crypto.randomUUID()}`,
+          ...nurseData,
+          created_at: new Date().toISOString(),
+        };
+        saveLocalNurses([...getLocalNurses(), localNurse]);
+        setNotice('تعذرت الإضافة إلى قاعدة البيانات؛ حُفظ الممرض على هذا الجهاز فقط ولن يظهر للأجهزة الأخرى.');
+      } else {
+        setNotice('');
       }
     }
 
     // Reset form and refresh
-    setFormData({ name: '', phone: '', passkey: '', is_supervisor: false });
+    setFormData({ name: '', phone: '', passkey: '', is_main_admin: false });
     setShowAddForm(false);
     setEditingNurse(null);
     fetchNurses();
@@ -901,7 +964,7 @@ function NursesTab() {
       name: nurse.name,
       phone: nurse.phone,
       passkey: nurse.passkey,
-      is_supervisor: nurse.is_supervisor,
+      is_main_admin: nurse.is_main_admin,
     });
     setShowAddForm(true);
   };
@@ -909,10 +972,17 @@ function NursesTab() {
   const handleDelete = async (id: string) => {
     if (!confirm('هل أنت متأكد من حذف هذا الممرض؟')) return;
 
+    if (id.startsWith('local-')) {
+      saveLocalNurses(getLocalNurses().filter((nurse) => nurse.id !== id));
+      fetchNurses();
+      return;
+    }
+
     const { error } = await supabase.from('nurses').delete().eq('id', id);
 
     if (error) {
-      alert('فشل حذف الممرض');
+      console.error('Error deleting nurse:', error);
+      setNotice('تعذر حذف الممرض من قاعدة البيانات.');
       return;
     }
 
@@ -920,7 +990,7 @@ function NursesTab() {
   };
 
   const handleCancel = () => {
-    setFormData({ name: '', phone: '', passkey: '', is_supervisor: false });
+    setFormData({ name: '', phone: '', passkey: '', is_main_admin: false });
     setShowAddForm(false);
     setEditingNurse(null);
   };
@@ -942,6 +1012,12 @@ function NursesTab() {
           </button>
         )}
       </div>
+
+      {notice && (
+        <div className="glass-card border-amber-400/20 p-3 mb-4 text-amber-200 text-sm" role="status">
+          {notice}
+        </div>
+      )}
 
       {showAddForm ? (
         <div className="glass-card p-6 mb-6 animate-fade-in-up">
@@ -987,12 +1063,12 @@ function NursesTab() {
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
-                id="is_supervisor"
-                checked={formData.is_supervisor}
-                onChange={(e) => setFormData({ ...formData, is_supervisor: e.target.checked })}
+                id="is_main_admin"
+                checked={formData.is_main_admin}
+                onChange={(e) => setFormData({ ...formData, is_main_admin: e.target.checked })}
                 className="w-4 h-4 rounded"
               />
-              <label htmlFor="is_supervisor" className="text-gray-300 text-sm">
+              <label htmlFor="is_main_admin" className="text-gray-300 text-sm">
                 مشرف (يمكنه الوصول للوحة التحكم)
               </label>
             </div>
@@ -1032,7 +1108,7 @@ function NursesTab() {
                   </div>
                   <div>
                     <h3 className="text-white font-semibold">{nurse.name}</h3>
-                    {nurse.is_supervisor && (
+                    {nurse.is_main_admin && (
                       <span className="text-xs text-amber-400">مشرف</span>
                     )}
                   </div>

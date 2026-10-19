@@ -47,8 +47,8 @@ export function Header({ currentPage, onNavigate, theme, onToggleTheme }: NavPro
   return (
     <>
       <header
-        className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
-          scrolled ? 'bg-[#0a192f]/95 backdrop-blur-xl border-b border-white/10 shadow-lg' : 'bg-transparent'
+        className={`site-header fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
+          scrolled ? 'is-scrolled bg-[#0a192f]/95 backdrop-blur-xl border-b border-white/10 shadow-lg' : 'bg-transparent'
         }`}
       >
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -73,9 +73,18 @@ export function Header({ currentPage, onNavigate, theme, onToggleTheme }: NavPro
               </a>
               <button
                 type="button"
-                onClick={() => setMenuOpen(true)}
-                className="p-2 rounded-lg text-white hover:bg-white/10 transition-colors"
-                aria-label="فتح القائمة"
+                onClick={onToggleTheme}
+                className="flex min-h-11 min-w-11 items-center justify-center rounded-xl text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
+                aria-label={theme === 'dark' ? 'التبديل إلى الوضع الفاتح' : 'التبديل إلى الوضع الداكن'}
+                aria-pressed={theme === 'dark'}
+              >
+                {theme === 'dark' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => setMenuOpen((open) => !open)}
+                className="flex min-h-12 min-w-12 items-center justify-center rounded-xl text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
+                aria-label={menuOpen ? 'إغلاق القائمة' : 'فتح القائمة'}
                 aria-expanded={menuOpen}
                 aria-controls="site-navigation"
               >
@@ -94,15 +103,15 @@ export function Header({ currentPage, onNavigate, theme, onToggleTheme }: NavPro
           type="button"
           onClick={() => setMenuOpen(false)}
           tabIndex={menuOpen ? 0 : -1}
-          aria-label="إغلاق القائمة"
-          className={`absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300 ${menuOpen ? 'opacity-100' : 'opacity-0'}`}
+          aria-label="إغلاق القائمة بالضغط خارجها"
+          className={`absolute inset-0 cursor-pointer bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300 ${menuOpen ? 'opacity-100' : 'opacity-0'}`}
         />
         <aside
           id="site-navigation"
           role="dialog"
           aria-modal={menuOpen}
           aria-label="القائمة الرئيسية"
-          className={`absolute inset-y-0 right-0 flex w-[min(22rem,88vw)] flex-col border-l border-white/10 bg-[#0a192f] p-5 shadow-2xl transition-transform duration-300 ease-out ${menuOpen ? 'translate-x-0' : 'translate-x-full'}`}
+          className={`site-navigation absolute inset-y-0 right-0 flex w-[min(22rem,88vw)] flex-col border-l border-white/10 bg-[#0a192f] p-5 shadow-2xl transition-transform duration-300 ease-out ${menuOpen ? 'translate-x-0' : 'translate-x-full'}`}
         >
           <div className="flex items-center justify-between border-b border-white/10 pb-5">
             <div className="flex items-center gap-3">
@@ -117,10 +126,10 @@ export function Header({ currentPage, onNavigate, theme, onToggleTheme }: NavPro
             <button
               type="button"
               onClick={() => setMenuOpen(false)}
-              className="p-2 rounded-lg text-white hover:bg-white/10 transition-colors"
+              className="flex min-h-16 min-w-16 -m-3 items-center justify-center rounded-2xl text-white transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300"
               aria-label="إغلاق القائمة"
             >
-              <X className="w-5 h-5" />
+              <X className="w-8 h-8" />
             </button>
           </div>
 
@@ -206,7 +215,7 @@ export function FloatingButtons() {
 
 export function Footer({ onNavigate }: { onNavigate: (page: Page) => void }) {
   return (
-    <footer className="mt-20 border-t border-white/10 bg-[#0a192f]">
+    <footer className="site-footer mt-20 border-t border-white/10 bg-[#0a192f]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           <div>
@@ -255,6 +264,17 @@ export function Footer({ onNavigate }: { onNavigate: (page: Page) => void }) {
           © 2026 Home Nursing. جميع الحقوق محفوظة.
         </div>
       </div>
+    </footer>
+  );
+}
+
+export function SiteCreditFooter() {
+  return (
+    <footer className="site-credit-footer border-t px-4 py-3 text-center text-xs transition-colors duration-300">
+      <p dir="ltr">Created by developer Eng/ Omar Eslam</p>
+      <a href="tel:01007204136" className="mt-0.5 inline-block transition-colors hover:text-sky-500" dir="ltr">
+        01007204136
+      </a>
     </footer>
   );
 }

@@ -10,7 +10,11 @@ import {
   formatPrice, generateBookingCode,
 } from '@/lib/supabase';
 import { getServiceIcon } from '@/lib/icons';
+import { mergeLocalNurses, normalizeNurses } from '@/lib/nurses';
 import type { Page } from '@/components/Layout';
+
+const CUSTOM_LOCATION_NAME = 'مكان مخصوص / خارج الحامول';
+const CUSTOM_LOCATION_ID_PREFIX = 'custom-location-';
 
 interface BookingProps {
   onNavigate: (page: Page) => void;
@@ -75,8 +79,19 @@ export function Booking({ onNavigate }: BookingProps) {
         supabase.from('admin_settings').select('id, night_shift_fee, urgent_fee, night_shift_start_hour, created_at').limit(1).maybeSingle(),
       ]);
       if (s.data) setServices(s.data);
-      if (v.data) setVillages(v.data);
-      if (n.data) setNurses(n.data);
+      if (v.data) {
+        const customLocationExists = v.data.some((village) => village.name === CUSTOM_LOCATION_NAME);
+        setVillages(customLocationExists ? v.data : [
+          ...v.data,
+          {
+            id: `${CUSTOM_LOCATION_ID_PREFIX}outside-hamoul`,
+            name: CUSTOM_LOCATION_NAME,
+            transfer_fee: 0,
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      }
+      setNurses(mergeLocalNurses(n.data ? normalizeNurses(n.data) : []));
       if (a.data) setSettings(a.data);
       setLoading(false);
     })();
@@ -85,6 +100,8 @@ export function Booking({ onNavigate }: BookingProps) {
   const orderedVillages = useMemo(() => {
     const priorities = new Map(MAIN_REGION_NAMES.map((name, index) => [name, index]));
     return [...villages].sort((left, right) => {
+      if (left.name === CUSTOM_LOCATION_NAME) return 1;
+      if (right.name === CUSTOM_LOCATION_NAME) return -1;
       const leftPriority = priorities.get(left.name);
       const rightPriority = priorities.get(right.name);
       if (leftPriority !== undefined || rightPriority !== undefined) {
@@ -186,31 +203,38 @@ export function Booking({ onNavigate }: BookingProps) {
       const dateTime = data.urgent || !data.date || !data.time
         ? null
         : new Date(`${data.date}T${data.time}`).toISOString();
+      const bookingNotes = [
+        data.notes.trim(),
+        ...(data.village?.name === CUSTOM_LOCATION_NAME ? [`الموقع: ${data.village.name}`] : []),
+        `رقم التحويل: ${data.senderNumber.trim()}`,
+        `الممرض: ${data.nurse?.name ?? 'سيتم تعيينه حسب التوفر'}`,
+        `رابط الإيصال: ${receiptUrl}`,
+      ].filter(Boolean).join('\n');
 
       const { error: insErr } = await supabase.from('bookings').insert({
         booking_code: code,
         client_name: data.name,
         client_phone: data.phone,
         address: data.address,
-        village_id: data.village?.id ?? null,
+        village_id: data.village && !data.village.id.startsWith(CUSTOM_LOCATION_ID_PREFIX)
+          ? data.village.id
+          : null,
         service_id: data.service?.id ?? null,
         care_type: data.service?.category ?? 'short_visit',
         date_time: dateTime,
         urgent_booking: data.urgent,
         prescription_url: prescriptionUrl,
-        sender_number: data.senderNumber.trim(),
-        receipt_url: receiptUrl,
         total_price: pricing.total,
         deposit_amount: pricing.deposit,
         payment_status: 'pending_deposit',
         status: 'new',
-        notes: data.nurse ? `الممرض المطلوب: ${data.nurse.name}\n${data.notes}` : data.notes,
+        notes: bookingNotes,
       });
 
       if (insErr) throw new Error(insErr.message);
       setBookingCode(code);
       setData((current) => ({ ...current, receiptUrl }));
-      setStep(6);
+      setStep(7);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'حدث خطأ أثناء الحجز');
     } finally {
@@ -351,6 +375,7 @@ export function Booking({ onNavigate }: BookingProps) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {filteredVillages.map((v) => {
                   const selected = data.village?.id === v.id;
+                  const customLocation = v.name === CUSTOM_LOCATION_NAME;
                   return (
                     <button
                       key={v.id}
@@ -366,6 +391,11 @@ export function Booking({ onNavigate }: BookingProps) {
                       </div>
                       <div className="flex-1">
                         <h3 className="text-white font-bold text-sm">{v.name}</h3>
+                        {customLocation && (
+                          <p className="mt-1 text-xs leading-5 text-amber-200">
+                            يتم تحديد رسوم الانتقال أثناء الزيارة.
+                          </p>
+                        )}
                       </div>
                       {selected && <CheckCircle2 className="w-5 h-5 text-teal-400 shrink-0" />}
                     </button>
@@ -417,7 +447,7 @@ export function Booking({ onNavigate }: BookingProps) {
                       </div>
                       <div className="flex-1">
                         <h3 className="text-white font-bold text-sm">{nurse.name}</h3>
-                        {nurse.is_supervisor && (
+                        {nurse.is_main_admin && (
                           <p className="text-amber-400 text-xs">مشرف عام</p>
                         )}
                       </div>
@@ -594,6 +624,11 @@ export function Booking({ onNavigate }: BookingProps) {
               <div className="space-y-3 mb-6">
                 <InvoiceRow label="الخدمة" value={data.service?.title ?? '-'} />
                 <InvoiceRow label="المنطقة" value={data.village?.name ?? '-'} />
+                {data.village?.name === CUSTOM_LOCATION_NAME && (
+                  <p className="rounded-lg border border-amber-300/20 bg-amber-400/5 p-3 text-sm leading-6 text-amber-200">
+                    يتم تحديد رسوم الانتقال أثناء الزيارة.
+                  </p>
+                )}
                 <InvoiceRow label="إسناد الممرض" value="تلقائي حسب التوفر" />
                 <InvoiceRow label="نوع الطلب" value={data.urgent ? 'عاجل' : `${data.date} ${data.time}`} />
                 <div className="border-t border-white/10 my-3" />
@@ -641,7 +676,7 @@ export function Booking({ onNavigate }: BookingProps) {
               <div>
                 <label className="text-gray-300 text-sm font-medium mb-2 flex items-center gap-2">
                   <Phone className="w-4 h-4 text-teal-400" />
-                  رقم المحول منه *
+                  رقم الهاتف المُحوَّل منه / فودافون كاش *
                 </label>
                 <input
                   type="text"
@@ -743,7 +778,7 @@ export function Booking({ onNavigate }: BookingProps) {
           )}
 
           {/* Navigation buttons */}
-          {step < 6 && (
+          {step < 7 && (
             <div className="flex items-center justify-between mt-8 pt-6 border-t border-white/10">
               <button
                 onClick={handlePrev}
@@ -786,7 +821,7 @@ export function Booking({ onNavigate }: BookingProps) {
         </div>
 
         {/* Back to home */}
-        {step < 6 && (
+        {step < 7 && (
           <div className="text-center mt-6">
             <button onClick={() => onNavigate('home')} className="text-gray-500 hover:text-teal-300 text-sm flex items-center gap-1 mx-auto transition-colors">
               <ArrowLeft className="w-4 h-4" />
